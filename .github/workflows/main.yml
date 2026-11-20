@@ -88,39 +88,173 @@ jobs:
               print("Total without animation:", len(missing))
           PY
 
-      - name: inspect complete keyframes
+      - name: add seamless cell fade
         run: |
           python3 - <<'PY'
           import re
           from pathlib import Path
 
-          svg = Path("dist/github-contribution-grid-snake.svg").read_text()
-          css = re.search(r'<style[^>]*>(.*?)</style>', svg, re.S).group(1)
+          FADE_START = 99.0
 
-          for name in ("c0", "c1", "c10"):
-              marker = f"@keyframes {name}"
-              start = css.find(marker)
+          def get_block(text, start):
+              brace = text.find("{", start)
+              if brace == -1:
+                  raise ValueError("Opening brace not found")
 
-              if start < 0:
-                  print(f"{name}: NOT FOUND")
-                  continue
-
-              brace = css.find("{", start)
               depth = 0
-              end = brace
 
-              for i in range(brace, len(css)):
-                  if css[i] == "{":
+              for i in range(brace, len(text)):
+                  if text[i] == "{":
                       depth += 1
-                  elif css[i] == "}":
+                  elif text[i] == "}":
                       depth -= 1
+
                       if depth == 0:
-                          end = i + 1
+                          return brace, i + 1
+
+              raise ValueError("Unclosed CSS block")
+
+          def patch_css(css):
+              rules = re.findall(
+                  r'\.c\.([a-zA-Z0-9_-]+)\s*\{([^{}]*)\}',
+                  css
+              )
+
+              patched = 0
+              skipped = []
+
+              for cell_id, declarations in rules:
+                  animation = re.search(
+                      r'animation-name\s*:\s*([a-zA-Z0-9_-]+)',
+                      declarations
+                  )
+
+                  color = re.search(
+                      r'\bfill\s*:\s*(var\(--c[^)]+\))',
+                      declarations
+                  )
+
+                  if not animation or not color:
+                      continue
+
+                  name = animation.group(1)
+                  original_color = color.group(1)
+
+                  marker = re.search(
+                      r'@keyframes\s+' + re.escape(name) + r'\s*\{',
+                      css
+                  )
+
+                  if not marker:
+                      skipped.append(cell_id)
+                      continue
+
+                  brace, end = get_block(css, marker.start())
+                  body = css[brace + 1:end - 1]
+
+                  frames = list(
+                      re.finditer(r'([^{}]+)\{([^{}]*)\}', body)
+                  )
+
+                  terminal = None
+
+                  for frame in frames:
+                      selectors = [
+                          x.strip()
+                          for x in frame.group(1).split(",")
+                      ]
+
+                      fill = re.search(
+                          r'\bfill\s*:\s*var\(--ce\)',
+                          frame.group(2)
+                      )
+
+                      if "100%" in selectors and fill:
+                          terminal = frame
                           break
 
-              print(f"\n===== {name} =====")
-              print(css[start:end])
+                  if terminal is None:
+                      skipped.append(cell_id)
+                      continue
+
+                  selectors = [
+                      x.strip()
+                      for x in terminal.group(1).split(",")
+                      if x.strip() != "100%"
+                  ]
+
+                  eat_times = [
+                      float(x[:-1])
+                      for x in selectors
+                      if re.fullmatch(r'\d+(?:\.\d+)?%', x)
+                  ]
+
+                  eat_end = max(eat_times, default=0.0)
+
+                  replacement = ""
+
+                  if selectors:
+                      replacement += (
+                          ",".join(selectors) +
+                          "{" + terminal.group(2) + "}"
+                      )
+
+                  if eat_end < FADE_START:
+                      replacement += (
+                          f"{FADE_START}%{{fill:var(--ce)}}"
+                      )
+
+                  replacement += (
+                      f"100%{{fill:{original_color}}}"
+                  )
+
+                  new_body = (
+                      body[:terminal.start()] +
+                      replacement +
+                      body[terminal.end():]
+                  )
+
+                  css = (
+                      css[:brace + 1] +
+                      new_body +
+                      css[end - 1:]
+                  )
+
+                  patched += 1
+
+              return css, patched, skipped
+
+          style_re = re.compile(
+              r'(<style[^>]*>)(.*?)(</style>)',
+              re.S
+          )
+
+          for path in Path("dist").glob("*.svg"):
+              svg = path.read_text()
+              stats = {"patched": 0, "skipped": []}
+
+              def process_style(match):
+                  css, count, skipped = patch_css(match.group(2))
+
+                  stats["patched"] += count
+                  stats["skipped"].extend(skipped)
+
+                  return match.group(1) + css + match.group(3)
+
+              svg = style_re.sub(process_style, svg)
+
+              print(f"\n{path.name}")
+              print(f"Patched: {stats['patched']}")
+              print(f"Skipped: {stats['skipped']}")
+
+              assert stats["patched"] > 0, "No cells patched"
+              assert not stats["skipped"], (
+                  f"Some cells were skipped: {stats['skipped']}"
+              )
+
+              path.write_text(svg)
           PY
+
       - name: verify cell fade
         run: |
           python3 - <<'PY'
