@@ -31,6 +31,27 @@ jobs:
             dist/github-contribution-grid-snake.svg
             dist/github-contribution-grid-snake-dark.svg?palette=github-dark
 
+      - name: remove progress bar
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          for path in Path("dist").glob("*.svg"):
+              svg = path.read_text()
+
+              svg, count = re.subn(
+                  r'<rect\b[^>]*\bclass="u [^"]*"[^>]*/>',
+                  '',
+                  svg
+              )
+
+              print(f"{path.name}: removed {count} progress elements")
+              assert count == 4, f"Expected 4 elements, got {count}"
+
+              path.write_text(svg)
+          PY
+
       - name: add seamless cell fade
         run: |
           python3 - <<'PY'
