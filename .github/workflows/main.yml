@@ -37,46 +37,75 @@ jobs:
           import re
           from pathlib import Path
 
+          FADE_START = "99%"
+
           style_re = re.compile(r'(<style[^>]*>)(.*?)(</style>)', re.S)
 
           for path in Path("dist").glob("*.svg"):
               svg = path.read_text()
-              stats = [0]
+              stats = {"found": 0, "patched": 0}
+              missing = []
 
               def patch_style(match):
                   css = match.group(2)
 
-                  colors = re.findall(
-                      r'\.c\.(c\d+)\{fill:(var\(--c\d+\));animation-name:\1\}',
+                  cells = re.findall(
+                      r'\.c\.(c\d+)\s*\{[^}]*?'
+                      r'\bfill:\s*(var\(--c\d+\))[^}]*?'
+                      r'\banimation-name:\s*\1\b[^}]*\}',
                       css
                   )
 
-                  for name, color in colors:
-                      pattern = re.compile(
-                          r'(@keyframes ' + re.escape(name) +
-                          r'\{.*?)(,\s*100%\{fill:var\(--ce\)\})(\})'
+                  stats["found"] += len(cells)
+
+                  for name, color in cells:
+                      start = css.find(f"@keyframes {name}{{")
+
+                      if start == -1:
+                          missing.append(name)
+                          continue
+
+                      next_start = css.find("@keyframes ", start + 1)
+                      end = next_start if next_start != -1 else len(css)
+
+                      segment = css[start:end]
+
+                      terminal = re.compile(
+                          r'(?P<previous>\d+(?:\.\d+)?%,)?'
+                          r'100%\{fill:var\(--ce\)\}'
                       )
 
-                      replacement = (
-                          r'\1,95%{fill:var(--ce)}'
-                          f'100%{{fill:{color}}}'
-                          r'\3'
-                      )
+                      def restore(m):
+                          previous = m.group("previous") or ""
+                          return (
+                              f"{previous}{FADE_START}{{fill:var(--ce)}}"
+                              f"100%{{fill:{color}}}"
+                          )
 
-                      css, count = pattern.subn(
-                          replacement,
-                          css,
+                      segment, count = terminal.subn(
+                          restore,
+                          segment,
                           count=1
                       )
 
-                      stats[0] += count
+                      if count:
+                          css = css[:start] + segment + css[end:]
+                          stats["patched"] += 1
+                      else:
+                          missing.append(name)
 
                   return match.group(1) + css + match.group(3)
 
               svg = style_re.sub(patch_style, svg)
 
-              print(f"{path.name}: patched {stats[0]} animations")
-              assert stats[0] > 0, "No animations were patched"
+              print(f"\n{path.name}")
+              print(f"Found:   {stats['found']}")
+              print(f"Patched: {stats['patched']}")
+              print(f"Missing: {missing}")
+
+              assert stats["found"] > 0, "No animated cells found"
+              assert not missing, f"Some cells were not patched: {missing}"
+              assert stats["found"] == stats["patched"], "Not all cells patched"
 
               path.write_text(svg)
           PY
