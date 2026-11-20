@@ -41,10 +41,9 @@ jobs:
 
           for path in Path("dist").glob("*.svg"):
               svg = path.read_text()
-              changed = 0
+              stats = [0]
 
               def patch_style(match):
-                  nonlocal_dummy = None
                   css = match.group(2)
 
                   colors = re.findall(
@@ -54,43 +53,30 @@ jobs:
 
                   for name, color in colors:
                       pattern = re.compile(
-                          r'(@keyframes ' + re.escape(name) + r'\{)(.*?)(\})'
+                          r'(@keyframes ' + re.escape(name) +
+                          r'\{.*?)(,\s*100%\{fill:var\(--ce\)\})(\})'
                       )
 
-                      def patch_keyframes(kf):
-                          body = kf.group(2)
-
-                          body, count = re.subn(
-                              r',100%(\{fill:var\(--ce\)\})',
-                              lambda m: f',95%{m.group(1)}100%{{fill:{color}}}',
-                              body,
-                              count=1
-                          )
-
-                          if count == 0:
-                              body, count = re.subn(
-                                  r'100%(\{fill:var\(--ce\)\})',
-                                  lambda m: f'95%{m.group(1)}100%{{fill:{color}}}',
-                                  body,
-                                  count=1
-                              )
-
-                          return kf.group(1) + body + kf.group(3), count
+                      replacement = (
+                          r'\1,95%{fill:var(--ce)}'
+                          f'100%{{fill:{color}}}'
+                          r'\3'
+                      )
 
                       css, count = pattern.subn(
-                          lambda m: patch_keyframes(m)[0],
+                          replacement,
                           css,
                           count=1
                       )
 
-                      changed += count
+                      stats[0] += count
 
                   return match.group(1) + css + match.group(3)
 
               svg = style_re.sub(patch_style, svg)
 
-              print(f"{path.name}: patched {changed} animations")
-              assert changed > 0, "No animations were patched"
+              print(f"{path.name}: patched {stats[0]} animations")
+              assert stats[0] > 0, "No animations were patched"
 
               path.write_text(svg)
           PY
