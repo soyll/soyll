@@ -31,27 +31,6 @@ jobs:
             dist/github-contribution-grid-snake.svg
             dist/github-contribution-grid-snake-dark.svg?palette=github-dark
 
-      - name: remove progress bar
-        run: |
-          python3 - <<'PY'
-          import re
-          from pathlib import Path
-
-          for path in Path("dist").glob("*.svg"):
-              svg = path.read_text()
-
-              svg, count = re.subn(
-                  r'<rect\b[^>]*\bclass="u [^"]*"[^>]*/>',
-                  '',
-                  svg
-              )
-
-              print(f"{path.name}: removed {count} progress elements")
-              assert count == 4, f"Expected 4 elements, got {count}"
-
-              path.write_text(svg)
-          PY
-
       - name: add seamless cell fade
         run: |
           python3 - <<'PY'
@@ -200,6 +179,199 @@ jobs:
               def process_style(match):
                   css, count, skipped = patch_css(match.group(2))
 
+                  stats["patched"] += count
+                  stats["skipped"].extend(skipped)
+
+                  return match.group(1) + css + match.group(3)
+
+              svg = style_re.sub(process_style, svg)
+
+              print(f"\n{path.name}")
+              print(f"Patched: {stats['patched']}")
+              print(f"Skipped: {stats['skipped']}")
+
+              assert stats["patched"] > 0, "No cells patched"
+              assert not stats["skipped"], (
+                  f"Some cells were skipped: {stats['skipped']}"
+              )
+
+              path.write_text(svg)
+          PY
+
+
+      - name: remove progress bar
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          for path in Path("dist").glob("*.svg"):
+              svg = path.read_text()
+
+              svg, count = re.subn(
+                  r'<rect\b[^>]*\bclass="u [^"]*"[^>]*/>',
+                  '',
+                  svg
+              )
+
+              print(f"{path.name}: removed {count} progress elements")
+              assert count == 4, f"Expected 4 elements, got {count}"
+
+              path.write_text(svg)
+          PY
+
+      - name: add seamless cell fade
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          FADE_START = 99.0
+
+          def get_block(text, start):
+              brace = text.find("{", start)
+              if brace == -1:
+                  raise ValueError("Opening brace not found")
+
+              depth = 0
+
+              for i in range(brace, len(text)):
+                  if text[i] == "{":
+                      depth += 1
+                  elif text[i] == "}":
+                      depth -= 1
+                      if depth == 0:
+                          return brace, i + 1
+
+              raise ValueError("Unclosed CSS block")
+
+          def patch_css(css):
+              rules = re.findall(
+                  r'\.c\.([a-zA-Z0-9_-]+)\s*\{([^{}]*)\}',
+                  css
+              )
+
+              replacements = []
+              skipped = []
+
+              for cell_id, declarations in rules:
+                  animation = re.search(
+                      r'animation-name\s*:\s*([a-zA-Z0-9_-]+)',
+                      declarations
+                  )
+                  color = re.search(
+                      r'\bfill\s*:\s*(var\(--c[^)]+\))',
+                      declarations
+                  )
+
+                  if not animation or not color:
+                      continue
+
+                  name = animation.group(1)
+                  original_color = color.group(1)
+
+                  marker = re.search(
+                      r'@keyframes\s+' + re.escape(name) + r'\s*\{',
+                      css
+                  )
+
+                  if not marker:
+                      skipped.append(cell_id)
+                      continue
+
+                  brace, end = get_block(css, marker.start())
+                  body = css[brace + 1:end - 1]
+
+                  frames = list(re.finditer(
+                      r'([^{}]+)\{([^{}]*)\}',
+                      body
+                  ))
+
+                  terminal = None
+
+                  for frame in frames:
+                      selectors = [
+                          x.strip()
+                          for x in frame.group(1).split(",")
+                      ]
+
+                      if (
+                          "100%" in selectors
+                          and re.search(
+                              r'\bfill\s*:\s*var\(--ce\)',
+                              frame.group(2)
+                          )
+                      ):
+                          terminal = frame
+                          break
+
+                  if terminal is None:
+                      skipped.append(cell_id)
+                      continue
+
+                  selectors = [
+                      x.strip()
+                      for x in terminal.group(1).split(",")
+                      if x.strip() != "100%"
+                  ]
+
+                  eat_times = [
+                      float(x[:-1])
+                      for x in selectors
+                      if re.fullmatch(r'\d+(?:\.\d+)?%', x)
+                  ]
+
+                  eat_end = max(eat_times, default=0.0)
+
+                  replacement = ""
+
+                  if selectors:
+                      replacement += (
+                          ",".join(selectors) +
+                          "{" + terminal.group(2) + "}"
+                      )
+
+                  if eat_end < FADE_START:
+                      replacement += (
+                          f"{FADE_START}%{{fill:var(--ce)}}"
+                      )
+
+                  replacement += (
+                      f"100%{{fill:{original_color}}}"
+                  )
+
+                  new_body = (
+                      body[:terminal.start()] +
+                      replacement +
+                      body[terminal.end():]
+                  )
+
+                  replacements.append((
+                      brace + 1,
+                      end - 1,
+                      new_body
+                  ))
+
+              for start, end, new_body in sorted(
+                  replacements,
+                  key=lambda item: item[0],
+                  reverse=True
+              ):
+                  css = css[:start] + new_body + css[end:]
+
+              return css, len(replacements), skipped
+
+          style_re = re.compile(
+              r'(<style[^>]*>)(.*?)(</style>)',
+              re.S
+          )
+
+          for path in Path("dist").glob("*.svg"):
+              svg = path.read_text()
+              stats = {"patched": 0, "skipped": []}
+
+              def process_style(match):
+                  css, count, skipped = patch_css(match.group(2))
                   stats["patched"] += count
                   stats["skipped"].extend(skipped)
 
