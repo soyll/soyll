@@ -43,53 +43,87 @@ jobs:
 
           for path in Path("dist").glob("*.svg"):
               svg = path.read_text()
-              stats = {"found": 0, "patched": 0}
+              stats = {"cells": 0, "patched": 0}
               missing = []
 
               def patch_style(match):
                   css = match.group(2)
 
-                  cells = re.findall(
-                      r'\.c\.(c\d+)\s*\{[^}]*?'
-                      r'\bfill:\s*(var\(--c\d+\))[^}]*?'
-                      r'\banimation-name:\s*\1\b[^}]*\}',
+                  cell_rules = re.findall(
+                      r'\.c\.(c[\w-]+)\s*\{([^}]*)\}',
                       css
                   )
 
-                  stats["found"] += len(cells)
+                  for name, declarations in cell_rules:
+                      animation = re.search(
+                          r'animation-name\s*:\s*([\w-]+)',
+                          declarations
+                      )
+                      color = re.search(
+                          r'(?<![-\w])fill\s*:\s*(var\(--c\d+\))',
+                          declarations
+                      )
 
-                  for name, color in cells:
-                      start = css.find(f"@keyframes {name}{{")
+                      if not animation or not color:
+                          continue
 
-                      if start == -1:
+                      animation_name = animation.group(1)
+                      original_color = color.group(1)
+                      stats["cells"] += 1
+
+                      keyframe_re = re.compile(
+                          r'@keyframes\s+' + re.escape(animation_name) +
+                          r'\s*\{(.*?)(?=@keyframes\s+|\Z)',
+                          re.S
+                      )
+
+                      keyframe = keyframe_re.search(css)
+
+                      if not keyframe:
                           missing.append(name)
                           continue
 
-                      next_start = css.find("@keyframes ", start + 1)
-                      end = next_start if next_start != -1 else len(css)
+                      body = keyframe.group(1)
 
-                      segment = css[start:end]
-
-                      terminal = re.compile(
-                          r'(?P<previous>\d+(?:\.\d+)?%,)?'
-                          r'100%\{fill:var\(--ce\)\}'
+                      terminal_re = re.compile(
+                          r'((?:\s*\d+(?:\.\d+)?%\s*,\s*)*100%)'
+                          r'\s*\{([^{}]*)\}'
                       )
 
                       def restore(m):
-                          previous = m.group("previous") or ""
-                          return (
-                              f"{previous}{FADE_START}{{fill:var(--ce)}}"
-                              f"100%{{fill:{color}}}"
+                          selectors = [
+                              x.strip()
+                              for x in m.group(1).split(",")
+                              if x.strip() != "100%"
+                          ]
+
+                          result = ""
+
+                          if selectors:
+                              result += (
+                                  ",".join(selectors) +
+                                  "{" + m.group(2) + "}"
+                              )
+
+                          result += (
+                              FADE_START + "{fill:var(--ce)}"
+                              "100%{fill:" + original_color + "}"
                           )
 
-                      segment, count = terminal.subn(
+                          return result
+
+                      new_body, count = terminal_re.subn(
                           restore,
-                          segment,
+                          body,
                           count=1
                       )
 
                       if count:
-                          css = css[:start] + segment + css[end:]
+                          css = (
+                              css[:keyframe.start(1)] +
+                              new_body +
+                              css[keyframe.end(1):]
+                          )
                           stats["patched"] += 1
                       else:
                           missing.append(name)
@@ -99,13 +133,13 @@ jobs:
               svg = style_re.sub(patch_style, svg)
 
               print(f"\n{path.name}")
-              print(f"Found:   {stats['found']}")
-              print(f"Patched: {stats['patched']}")
-              print(f"Missing: {missing}")
+              print(f"Animated cells: {stats['cells']}")
+              print(f"Patched:        {stats['patched']}")
+              print(f"Missing:        {missing}")
 
-              assert stats["found"] > 0, "No animated cells found"
-              assert not missing, f"Some cells were not patched: {missing}"
-              assert stats["found"] == stats["patched"], "Not all cells patched"
+              assert stats["cells"] > 0, "No animated cells found"
+              assert not missing, f"Unpatched cells: {missing}"
+              assert stats["cells"] == stats["patched"]
 
               path.write_text(svg)
           PY
