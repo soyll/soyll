@@ -31,22 +31,68 @@ jobs:
             dist/github-contribution-grid-snake.svg
             dist/github-contribution-grid-snake-dark.svg?palette=github-dark
 
-      - name: inspect SVG animations
+      - name: add seamless cell fade
         run: |
           python3 - <<'PY'
           import re
           from pathlib import Path
 
+          style_re = re.compile(r'(<style[^>]*>)(.*?)(</style>)', re.S)
+
           for path in Path("dist").glob("*.svg"):
               svg = path.read_text()
-              print(f"\n===== {path.name} =====")
+              changed = 0
 
-              for css in re.findall(
-                  r'<style[^>]*>(.*?)</style>',
-                  svg,
-                  re.S
-              ):
-                  print(css)
+              def patch_style(match):
+                  nonlocal_dummy = None
+                  css = match.group(2)
+
+                  colors = re.findall(
+                      r'\.c\.(c\d+)\{fill:(var\(--c\d+\));animation-name:\1\}',
+                      css
+                  )
+
+                  for name, color in colors:
+                      pattern = re.compile(
+                          r'(@keyframes ' + re.escape(name) + r'\{)(.*?)(\})'
+                      )
+
+                      def patch_keyframes(kf):
+                          body = kf.group(2)
+
+                          body, count = re.subn(
+                              r',100%(\{fill:var\(--ce\)\})',
+                              lambda m: f',95%{m.group(1)}100%{{fill:{color}}}',
+                              body,
+                              count=1
+                          )
+
+                          if count == 0:
+                              body, count = re.subn(
+                                  r'100%(\{fill:var\(--ce\)\})',
+                                  lambda m: f'95%{m.group(1)}100%{{fill:{color}}}',
+                                  body,
+                                  count=1
+                              )
+
+                          return kf.group(1) + body + kf.group(3), count
+
+                      css, count = pattern.subn(
+                          lambda m: patch_keyframes(m)[0],
+                          css,
+                          count=1
+                      )
+
+                      changed += count
+
+                  return match.group(1) + css + match.group(3)
+
+              svg = style_re.sub(patch_style, svg)
+
+              print(f"{path.name}: patched {changed} animations")
+              assert changed > 0, "No animations were patched"
+
+              path.write_text(svg)
           PY
 
       - name: remove progress bar
