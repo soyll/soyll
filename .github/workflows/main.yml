@@ -81,6 +81,29 @@ jobs:
               path.write_text(svg)
           PY
 
+      - name: verify cell fade
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          for path in Path("dist").glob("*.svg"):
+              css = re.search(
+                  r'<style[^>]*>(.*?)</style>',
+                  path.read_text(),
+                  re.S
+              ).group(1)
+
+              print(f"\n===== {path.name} =====")
+
+              for name in ("c0", "c1", "c2"):
+                  match = re.search(
+                      rf'@keyframes {name}\{{.*?\}}',
+                      css
+                  )
+                  print(match.group(0) if match else f"{name}: NOT FOUND")
+          PY
+
       - name: remove progress bar
         run: |
           python3 - <<'PY'
