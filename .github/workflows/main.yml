@@ -88,6 +88,32 @@ jobs:
               print("Total without animation:", len(missing))
           PY
 
+      - name: inspect cell animations
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          path = Path("dist/github-contribution-grid-snake.svg")
+          svg = path.read_text()
+          css = re.search(r'<style[^>]*>(.*?)</style>', svg, re.S).group(1)
+
+          for name in ("c0", "c1", "c10", "c20", "c30"):
+              print(f"\n===== {name} =====")
+
+              rule = re.search(
+                  rf'\.c\.{name}\s*\{{[^}}]*\}}',
+                  css
+              )
+              frames = re.search(
+                  rf'@keyframes\s+{name}\s*\{{.*?\}}',
+                  css
+              )
+
+              print(rule.group(0) if rule else "RULE NOT FOUND")
+              print(frames.group(0) if frames else "KEYFRAMES NOT FOUND")
+          PY
+
       - name: verify cell fade
         run: |
           python3 - <<'PY'
