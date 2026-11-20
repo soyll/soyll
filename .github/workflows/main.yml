@@ -88,36 +88,39 @@ jobs:
               print("Total without animation:", len(missing))
           PY
 
-      - name: inspect full keyframes
+      - name: inspect complete keyframes
         run: |
           python3 - <<'PY'
           import re
           from pathlib import Path
 
-          path = Path("dist/github-contribution-grid-snake.svg")
-          svg = path.read_text()
+          svg = Path("dist/github-contribution-grid-snake.svg").read_text()
           css = re.search(r'<style[^>]*>(.*?)</style>', svg, re.S).group(1)
 
           for name in ("c0", "c1", "c10"):
+              marker = f"@keyframes {name}"
+              start = css.find(marker)
+
+              if start < 0:
+                  print(f"{name}: NOT FOUND")
+                  continue
+
+              brace = css.find("{", start)
+              depth = 0
+              end = brace
+
+              for i in range(brace, len(css)):
+                  if css[i] == "{":
+                      depth += 1
+                  elif css[i] == "}":
+                      depth -= 1
+                      if depth == 0:
+                          end = i + 1
+                          break
+
               print(f"\n===== {name} =====")
-
-              rule = re.search(
-                  rf'\.c\.{name}\s*\{{[^}}]*\}}',
-                  css
-              )
-
-              frame = re.search(
-                  rf'@keyframes\s+{name}\s*\{{(.*?)\}}',
-                  css
-              )
-
-              print("RULE:")
-              print(rule.group(0) if rule else "NOT FOUND")
-
-              print("KEYFRAMES:")
-              print(frame.group(1) if frame else "NOT FOUND")
+              print(css[start:end])
           PY
-
       - name: verify cell fade
         run: |
           python3 - <<'PY'
