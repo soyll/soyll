@@ -31,6 +31,22 @@ jobs:
             dist/github-contribution-grid-snake.svg
             dist/github-contribution-grid-snake-dark.svg?palette=github-dark
 
+      - name: Remove progress bar
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          for path in Path("dist").glob("*.svg"):
+              svg = path.read_text()
+              svg = re.sub(
+                  r'<rect\b(?=[^>]*\bclass="u(?:\s|")")[^>]*/>',
+                  '',
+                  svg
+              )
+              path.write_text(svg)
+          PY
+
       - name: commit generated SVG files
         run: |
           git config user.name github-actions[bot]
