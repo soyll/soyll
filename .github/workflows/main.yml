@@ -31,63 +31,6 @@ jobs:
             dist/github-contribution-grid-snake.svg
             dist/github-contribution-grid-snake-dark.svg?palette=github-dark
 
-      - name: diagnose cell animations
-        run: |
-          python3 - <<'PY'
-          import re
-          from pathlib import Path
-          from collections import Counter
-
-          for path in Path("dist").glob("*.svg"):
-              svg = path.read_text()
-              css = re.search(
-                  r'<style[^>]*>(.*?)</style>',
-                  svg,
-                  re.S
-              ).group(1)
-
-              rects = re.findall(
-                  r'<rect\b[^>]*class="([^"]*)"[^>]*/>',
-                  svg
-              )
-
-              cells = [
-                  classes.split()
-                  for classes in rects
-                  if "c" in classes.split()
-              ]
-
-              animated = set(re.findall(
-                  r'\.c\.([\w-]+)\s*\{[^}]*animation-name\s*:\s*([\w-]+)',
-                  css
-              ))
-
-              keyframes = set(re.findall(
-                  r'@keyframes\s+([\w-]+)',
-                  css
-              ))
-
-              cell_classes = Counter(
-                  cls
-                  for classes in cells
-                  for cls in classes
-                  if cls != "c"
-              )
-
-              missing = [
-                  cls for cls in cell_classes
-                  if not any(name == cls for name, _ in animated)
-              ]
-
-              print(f"\n===== {path.name} =====")
-              print("Grid cells:", len(cells))
-              print("Unique cell classes:", len(cell_classes))
-              print("Animated classes:", len(animated))
-              print("Keyframes:", len(keyframes))
-              print("Classes without animation:", missing[:30])
-              print("Total without animation:", len(missing))
-          PY
-
       - name: add seamless cell fade
         run: |
           python3 - <<'PY'
@@ -251,50 +194,6 @@ jobs:
               assert not stats["skipped"], (
                   f"Some cells were skipped: {stats['skipped']}"
               )
-
-              path.write_text(svg)
-          PY
-
-      - name: verify cell fade
-        run: |
-          python3 - <<'PY'
-          import re
-          from pathlib import Path
-
-          for path in Path("dist").glob("*.svg"):
-              css = re.search(
-                  r'<style[^>]*>(.*?)</style>',
-                  path.read_text(),
-                  re.S
-              ).group(1)
-
-              print(f"\n===== {path.name} =====")
-
-              for name in ("c0", "c1", "c2"):
-                  match = re.search(
-                      rf'@keyframes {name}\{{.*?\}}',
-                      css
-                  )
-                  print(match.group(0) if match else f"{name}: NOT FOUND")
-          PY
-
-      - name: remove progress bar
-        run: |
-          python3 - <<'PY'
-          import re
-          from pathlib import Path
-
-          for path in Path("dist").glob("*.svg"):
-              svg = path.read_text()
-
-              svg, count = re.subn(
-                  r'<rect\b[^>]*\bclass="u [^"]*"[^>]*/>',
-                  '',
-                  svg
-              )
-
-              print(f"{path.name}: removed {count} progress elements")
-              assert count == 4, f"Expected 4 elements, got {count}"
 
               path.write_text(svg)
           PY
