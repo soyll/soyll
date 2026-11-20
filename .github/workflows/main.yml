@@ -88,7 +88,7 @@ jobs:
               print("Total without animation:", len(missing))
           PY
 
-      - name: inspect cell animations
+      - name: inspect full keyframes
         run: |
           python3 - <<'PY'
           import re
@@ -98,20 +98,24 @@ jobs:
           svg = path.read_text()
           css = re.search(r'<style[^>]*>(.*?)</style>', svg, re.S).group(1)
 
-          for name in ("c0", "c1", "c10", "c20", "c30"):
+          for name in ("c0", "c1", "c10"):
               print(f"\n===== {name} =====")
 
               rule = re.search(
                   rf'\.c\.{name}\s*\{{[^}}]*\}}',
                   css
               )
-              frames = re.search(
-                  rf'@keyframes\s+{name}\s*\{{.*?\}}',
+
+              frame = re.search(
+                  rf'@keyframes\s+{name}\s*\{{(.*?)\}}',
                   css
               )
 
-              print(rule.group(0) if rule else "RULE NOT FOUND")
-              print(frames.group(0) if frames else "KEYFRAMES NOT FOUND")
+              print("RULE:")
+              print(rule.group(0) if rule else "NOT FOUND")
+
+              print("KEYFRAMES:")
+              print(frame.group(1) if frame else "NOT FOUND")
           PY
 
       - name: verify cell fade
