@@ -31,117 +31,61 @@ jobs:
             dist/github-contribution-grid-snake.svg
             dist/github-contribution-grid-snake-dark.svg?palette=github-dark
 
-      - name: add seamless cell fade
+      - name: diagnose cell animations
         run: |
           python3 - <<'PY'
           import re
           from pathlib import Path
-
-          FADE_START = "99%"
-
-          style_re = re.compile(r'(<style[^>]*>)(.*?)(</style>)', re.S)
+          from collections import Counter
 
           for path in Path("dist").glob("*.svg"):
               svg = path.read_text()
-              stats = {"cells": 0, "patched": 0}
-              missing = []
+              css = re.search(
+                  r'<style[^>]*>(.*?)</style>',
+                  svg,
+                  re.S
+              ).group(1)
 
-              def patch_style(match):
-                  css = match.group(2)
+              rects = re.findall(
+                  r'<rect\b[^>]*class="([^"]*)"[^>]*/>',
+                  svg
+              )
 
-                  cell_rules = re.findall(
-                      r'\.c\.(c[\w-]+)\s*\{([^}]*)\}',
-                      css
-                  )
+              cells = [
+                  classes.split()
+                  for classes in rects
+                  if "c" in classes.split()
+              ]
 
-                  for name, declarations in cell_rules:
-                      animation = re.search(
-                          r'animation-name\s*:\s*([\w-]+)',
-                          declarations
-                      )
-                      color = re.search(
-                          r'(?<![-\w])fill\s*:\s*(var\(--c\d+\))',
-                          declarations
-                      )
+              animated = set(re.findall(
+                  r'\.c\.([\w-]+)\s*\{[^}]*animation-name\s*:\s*([\w-]+)',
+                  css
+              ))
 
-                      if not animation or not color:
-                          continue
+              keyframes = set(re.findall(
+                  r'@keyframes\s+([\w-]+)',
+                  css
+              ))
 
-                      animation_name = animation.group(1)
-                      original_color = color.group(1)
-                      stats["cells"] += 1
+              cell_classes = Counter(
+                  cls
+                  for classes in cells
+                  for cls in classes
+                  if cls != "c"
+              )
 
-                      keyframe_re = re.compile(
-                          r'@keyframes\s+' + re.escape(animation_name) +
-                          r'\s*\{(.*?)(?=@keyframes\s+|\Z)',
-                          re.S
-                      )
+              missing = [
+                  cls for cls in cell_classes
+                  if not any(name == cls for name, _ in animated)
+              ]
 
-                      keyframe = keyframe_re.search(css)
-
-                      if not keyframe:
-                          missing.append(name)
-                          continue
-
-                      body = keyframe.group(1)
-
-                      terminal_re = re.compile(
-                          r'((?:\s*\d+(?:\.\d+)?%\s*,\s*)*100%)'
-                          r'\s*\{([^{}]*)\}'
-                      )
-
-                      def restore(m):
-                          selectors = [
-                              x.strip()
-                              for x in m.group(1).split(",")
-                              if x.strip() != "100%"
-                          ]
-
-                          result = ""
-
-                          if selectors:
-                              result += (
-                                  ",".join(selectors) +
-                                  "{" + m.group(2) + "}"
-                              )
-
-                          result += (
-                              FADE_START + "{fill:var(--ce)}"
-                              "100%{fill:" + original_color + "}"
-                          )
-
-                          return result
-
-                      new_body, count = terminal_re.subn(
-                          restore,
-                          body,
-                          count=1
-                      )
-
-                      if count:
-                          css = (
-                              css[:keyframe.start(1)] +
-                              new_body +
-                              css[keyframe.end(1):]
-                          )
-                          stats["patched"] += 1
-                      else:
-                          missing.append(name)
-
-                  return match.group(1) + css + match.group(3)
-
-              svg = style_re.sub(patch_style, svg)
-
-              print(f"\n{path.name}")
-              print(f"Animated cells: {stats['cells']}")
-              print(f"Patched:        {stats['patched']}")
-              print(f"Missing:        {missing}")
-
-              assert stats["cells"] > 0, "No animated cells found"
-              assert not missing, f"Unpatched cells: {missing}"
-              assert stats["cells"] == stats["patched"]
-
-              path.write_text(svg)
+              print(f"\n===== {path.name} =====")
+              print("Grid cells:", len(cells))
+              print("Unique cell classes:", len(cell_classes))
+              print("Animated classes:", len(animated))
+              print("Keyframes:", len(keyframes))
+              print("Classes without animation:", missing[:30])
+              print("Total without animation:", len(missing))
           PY
 
       - name: verify cell fade
