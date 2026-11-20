@@ -31,7 +31,7 @@ jobs:
             dist/github-contribution-grid-snake.svg
             dist/github-contribution-grid-snake-dark.svg?palette=github-dark
 
-      - name: debug progress bar
+      - name: inspect SVG animations
         run: |
           python3 - <<'PY'
           import re
@@ -41,9 +41,12 @@ jobs:
               svg = path.read_text()
               print(f"\n===== {path.name} =====")
 
-              for tag in re.findall(r'<[^>]+>', svg):
-                  if any(x in tag.lower() for x in ['animate', 'rect', 'path']):
-                      print(tag[:1000])
+              for css in re.findall(
+                  r'<style[^>]*>(.*?)</style>',
+                  svg,
+                  re.S
+              ):
+                  print(css)
           PY
 
       - name: remove progress bar
@@ -54,11 +57,16 @@ jobs:
 
           for path in Path("dist").glob("*.svg"):
               svg = path.read_text()
-              svg = re.sub(
-                  r'<rect\b(?=[^>]*\bclass="u(?:\s|")")[^>]*/>',
+
+              svg, count = re.subn(
+                  r'<rect\b[^>]*\bclass="u [^"]*"[^>]*/>',
                   '',
                   svg
               )
+
+              print(f"{path.name}: removed {count} progress elements")
+              assert count == 4, f"Expected 4 elements, got {count}"
+
               path.write_text(svg)
           PY
 
